@@ -12,3 +12,4 @@ export 'resources.dart';
 export 'connection/requests.dart';
 export 'connection/connections.dart';
 export 'developer.dart';
+export 'hysteria_settings.dart';
