@@ -329,6 +329,7 @@ enum PageLabel {
   requests,
   resources,
   connections,
+  hysteria,
 }
 
 enum RuleAction {

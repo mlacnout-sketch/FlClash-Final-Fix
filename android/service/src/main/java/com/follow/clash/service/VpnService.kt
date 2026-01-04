@@ -233,8 +233,86 @@ class VpnService : SystemVpnService(), IBaseService,
         )
     }
 
+    private val coreProcesses = mutableListOf<Process>()
+
+    private fun startProcessLogger(process: Process, tag: String) {
+        Thread {
+            try {
+                process.inputStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Log.i("FlClash", "[$tag] $it") }
+                }
+            } catch (e: Exception) {}
+        }.start()
+        Thread {
+            try {
+                process.errorStream.bufferedReader().use { reader ->
+                    reader.forEachLine { Log.e("FlClash", "[$tag] $it") }
+                }
+            } catch (e: Exception) {}
+        }.start()
+    }
+
+    private fun startZivpnCores() {
+        try {
+            val binDir = java.io.File(cacheDir, "bin")
+            val libUz = java.io.File(binDir, "libuz").absolutePath
+            val libLoad = java.io.File(binDir, "libload").absolutePath
+
+            if (!java.io.File(libUz).exists()) {
+                Log.e("FlClash", "Binary libuz not found at $libUz")
+                return
+            }
+
+            val prefs = getSharedPreferences("zivpn_config", MODE_PRIVATE)
+            val ip = prefs.getString("ip", "202.10.48.173") ?: "202.10.48.173"
+            val pass = prefs.getString("pass", "asd63") ?: "asd63"
+            val obfs = prefs.getString("obfs", "hu``hqb`c") ?: "hu``hqb`c"
+
+            Log.i("FlClash", "Starting ZIVPN Cores with IP: $ip")
+
+            val tunnels = mutableListOf<String>()
+            val ports = listOf(1080, 1081, 1082, 1083)
+
+            for (port in ports) {
+                // Construct JSON config manually
+                val configContent = "{\"server\":\"$ip:6000-19999\",\"obfs\":\"$obfs\",\"auth\":\"$pass\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
+                
+                val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
+                // pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir // Not needed for static binaries usually, but good practice
+                val process = pb.start()
+                coreProcesses.add(process)
+                startProcessLogger(process, "Core-$port")
+                tunnels.add("127.0.0.1:$port")
+            }
+
+            // Start Load Balancer
+            val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
+            lbArgs.addAll(tunnels)
+            val lbPb = ProcessBuilder(lbArgs)
+            val lbProcess = lbPb.start()
+            coreProcesses.add(lbProcess)
+            startProcessLogger(lbProcess, "LoadBalancer")
+
+            Log.i("FlClash", "ZIVPN Turbo Engine started successfully on port 7777")
+
+        } catch (e: Exception) {
+            Log.e("FlClash", "Failed to start ZIVPN Cores: ${e.message}", e)
+        }
+    }
+
+    private fun stopZivpnCores() {
+        coreProcesses.forEach { 
+            try {
+                it.destroy() 
+            } catch(e: Exception) {}
+        }
+        coreProcesses.clear()
+        Log.i("FlClash", "ZIVPN Cores stopped")
+    }
+
     override fun start() {
         try {
+            startZivpnCores()
             loader.load()
             State.options?.let {
                 handleStart(it)
@@ -245,6 +323,7 @@ class VpnService : SystemVpnService(), IBaseService,
     }
 
     override fun stop() {
+        stopZivpnCores()
         loader.cancel()
         Core.stopTun()
         stopSelf()
