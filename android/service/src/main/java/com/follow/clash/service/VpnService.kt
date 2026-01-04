@@ -234,6 +234,7 @@ class VpnService : SystemVpnService(), IBaseService,
     }
 
     private val coreProcesses = mutableListOf<Process>()
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     private fun startProcessLogger(process: Process, tag: String) {
         Thread {
@@ -272,13 +273,14 @@ class VpnService : SystemVpnService(), IBaseService,
 
             val tunnels = mutableListOf<String>()
             val ports = listOf(1080, 1081, 1082, 1083)
+            val nativeDir = applicationInfo.nativeLibraryDir
 
             for (port in ports) {
                 // Construct JSON config manually
                 val configContent = "{\"server\":\"$ip:6000-19999\",\"obfs\":\"$obfs\",\"auth\":\"$pass\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
                 
                 val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
-                // pb.environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir // Not needed for static binaries usually, but good practice
+                pb.environment()["LD_LIBRARY_PATH"] = nativeDir
                 val process = pb.start()
                 coreProcesses.add(process)
                 startProcessLogger(process, "Core-$port")
@@ -289,6 +291,7 @@ class VpnService : SystemVpnService(), IBaseService,
             val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
             lbArgs.addAll(tunnels)
             val lbPb = ProcessBuilder(lbArgs)
+            lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
             val lbProcess = lbPb.start()
             coreProcesses.add(lbProcess)
             startProcessLogger(lbProcess, "LoadBalancer")
@@ -310,6 +313,14 @@ class VpnService : SystemVpnService(), IBaseService,
         Log.i("FlClash", "ZIVPN Cores stopped")
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FlClash:ZivpnWakeLock")
+        wakeLock?.acquire(10*60*60*1000L) // 10 hours safety limit
+        handleCreate()
+    }
+
     override fun start() {
         try {
             startZivpnCores()
@@ -327,6 +338,14 @@ class VpnService : SystemVpnService(), IBaseService,
         loader.cancel()
         Core.stopTun()
         stopSelf()
+    }
+
+    override fun onDestroy() {
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
+        handleDestroy()
+        super.onDestroy()
     }
 
     companion object {
