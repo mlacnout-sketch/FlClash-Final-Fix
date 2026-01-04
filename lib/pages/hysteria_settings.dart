@@ -33,18 +33,34 @@ class _HysteriaSettingsPageState extends State<HysteriaSettingsPage> {
         'obfs': _obfsController.text,
       });
       if (mounted) {
-        CommonDialog.show(
+        showDialog(
           context: context,
-          title: const Text('Success'),
-          content: Text(result),
+          builder: (context) => AlertDialog(
+            title: const Text('Success'),
+            content: Text(result),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
         );
       }
     } on PlatformException catch (e) {
       if (mounted) {
-        CommonDialog.show(
+        showDialog(
           context: context,
-          title: const Text('Error'),
-          content: Text("Failed to start: '${e.message}'"),
+          builder: (context) => AlertDialog(
+            title: const Text('Error'),
+            content: Text("Failed to start: '${e.message}'"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
         );
       }
     }

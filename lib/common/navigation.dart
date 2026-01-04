@@ -69,7 +69,7 @@ class Navigation {
       NavigationItem(
         icon: Icon(Icons.rocket_launch),
         label: PageLabel.hysteria,
-        builder: (_) => const HysteriaSettingsPage(),
+        builder: (_) => HysteriaSettingsPage(),
         modes: [NavigationItemMode.desktop, NavigationItemMode.mobile],
       ),
     ];
