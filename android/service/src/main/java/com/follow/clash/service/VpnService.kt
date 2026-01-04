@@ -38,12 +38,22 @@ class VpnService : SystemVpnService(), IBaseService,
         install(SuspendModule(self))
     }
 
+    private val coreProcesses = mutableListOf<Process>()
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
     override fun onCreate() {
         super.onCreate()
+        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FlClash:ZivpnWakeLock")
+        wakeLock?.acquire(10*60*60*1000L) // 10 hours safety limit
         handleCreate()
     }
 
     override fun onDestroy() {
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
+        stopZivpnCores()
         handleDestroy()
         super.onDestroy()
     }
@@ -313,14 +323,6 @@ class VpnService : SystemVpnService(), IBaseService,
         Log.i("FlClash", "ZIVPN Cores stopped")
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-        wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FlClash:ZivpnWakeLock")
-        wakeLock?.acquire(10*60*60*1000L) // 10 hours safety limit
-        handleCreate()
-    }
-
     override fun start() {
         try {
             startZivpnCores()
@@ -338,14 +340,6 @@ class VpnService : SystemVpnService(), IBaseService,
         loader.cancel()
         Core.stopTun()
         stopSelf()
-    }
-
-    override fun onDestroy() {
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
-        }
-        handleDestroy()
-        super.onDestroy()
     }
 
     companion object {
