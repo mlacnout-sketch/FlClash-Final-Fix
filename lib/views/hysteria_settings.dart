@@ -84,11 +84,10 @@ rules:
       await file.create(recursive: true);
       await file.writeAsString(yamlContent);
 
-      final profile = Profile(
-        id: profileId,
+      final profile = Profile.normal(
         label: profileLabel,
-        autoUpdateDuration: const Duration(days: 1),
-        url: '', // Local file
+      ).copyWith(
+        id: profileId,
       );
 
       // Add to app controller
