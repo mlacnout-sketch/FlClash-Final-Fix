@@ -409,10 +409,11 @@ class BuildCommand extends Command {
     required String env,
   }) async {
     await Build.getDistributor();
+    final flutterBuildArgs = args.startsWith(',') ? args.substring(1) : args;
     await Build.exec(
       name: name,
       Build.getExecutable(
-        'flutter_distributor package --skip-clean --platform ${target.name} --targets $targets --flutter-build-args=verbose$args --build-dart-define=APP_ENV=$env',
+        'flutter_distributor package --skip-clean --platform ${target.name} --targets $targets ${flutterBuildArgs.isNotEmpty ? '--flutter-build-args=$flutterBuildArgs' : ''} --build-dart-define=APP_ENV=$env',
       ),
     );
   }
