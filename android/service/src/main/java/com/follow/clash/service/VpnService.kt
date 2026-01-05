@@ -301,17 +301,44 @@ class VpnService : SystemVpnService(), IBaseService,
             val ip = prefs.getString("ip", "202.10.48.173") ?: "202.10.48.173"
             val pass = prefs.getString("pass", "asd63") ?: "asd63"
             val obfs = prefs.getString("obfs", "hu``hqb`c") ?: "hu``hqb`c"
+            val portRange = prefs.getString("port_range", "6000-19999") ?: "6000-19999"
 
-            Log.i("FlClash", "Starting ZIVPN Cores with IP: $ip")
+            Log.i("FlClash", "Starting ZIVPN Cores with IP: $ip, Range: $portRange")
 
             val tunnels = mutableListOf<String>()
             val ports = listOf(1080, 1081, 1082, 1083)
             val nativeDir = applicationInfo.nativeLibraryDir
+            
+            // Helper to escape JSON string properly
+            fun escapeJson(s: String): String {
+                return s.replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
+                        .replace("\b", "\\b")
+                        .replace("\f", "\\f")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                        .replace("\t", "\\t")
+            }
 
             for (port in ports) {
-                // Construct JSON config manually
-                val configContent = "{\"server\":\"$ip:6000-19999\",\"obfs\":\"$obfs\",\"auth\":\"$pass\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
+                // Construct JSON config with absolute precision
+                val configContent = """
+                {
+                    "server": "${escapeJson(ip)}:${escapeJson(portRange)}",
+                    "obfs": "${escapeJson(obfs)}",
+                    "auth": "${escapeJson(pass)}",
+                    "socks5": {
+                        "listen": "127.0.0.1:$port"
+                    },
+                    "insecure": true,
+                    "recvwindowconn": 131072,
+                    "recvwindow": 327680
+                }
+                """.trimIndent().replace("\n", "").replace(" ", "")
                 
+                // Log the exact command for debugging (viewable in logcat)
+                Log.d("FlClash", "Executing: $libUz -s $obfs --config $configContent")
+
                 val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
                 pb.environment()["LD_LIBRARY_PATH"] = nativeDir
                 val process = pb.start()
