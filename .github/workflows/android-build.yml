@@ -62,7 +62,7 @@ jobs:
           go mod tidy
 
       - name: Setup FlClash Core
-        run: dart setup.dart android
+        run: dart setup.dart android --out core
 
       - name: Decode Keystore
         env:
