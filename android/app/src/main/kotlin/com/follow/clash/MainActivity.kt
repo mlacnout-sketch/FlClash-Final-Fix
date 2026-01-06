@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity(),
     CoroutineScope by CoroutineScope(SupervisorJob() + Dispatchers.Default) {
@@ -31,6 +33,27 @@ class MainActivity : FlutterActivity(),
         super.onCreate(savedInstanceState)
         lifecycleScope.launch {
             State.destroyServiceEngine()
+            extractBinaries()
+        }
+    }
+
+    private fun extractBinaries() {
+        try {
+            val binDir = filesDir
+            
+            listOf("libuz.so", "libload.so").forEach { fileName ->
+                val outFile = File(binDir, fileName)
+                // Always overwrite to ensure latest version from assets
+                assets.open("flutter_assets/assets/bin/$fileName").use { input ->
+                    FileOutputStream(outFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                outFile.setExecutable(true)
+            }
+            android.util.Log.i("FlClash", "Binaries extracted to ${binDir.absolutePath}")
+        } catch (e: Exception) {
+            android.util.Log.e("FlClash", "Failed to extract binaries: ${e.message}")
         }
     }
 
