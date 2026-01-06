@@ -310,21 +310,27 @@ class VpnService : SystemVpnService(), IBaseService,
             val tunnels = mutableListOf<String>()
             val ports = listOf(1080, 1081, 1082, 1083)
             
+            // Multi-Range Logic: Split by comma and trim
+            val ranges = portRange.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            
             // Helper to escape JSON string properly (Simplified for Kotlin compatibility)
             fun escapeJson(s: String): String {
-                return s.replace("\", "\\\\")
-                        .replace("\"", "\\"")
+                return s.replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
                         .replace("\n", "\\n")
                         .replace("\r", "\\r")
                         .replace("\t", "\\t")
             }
 
-            for (port in ports) {
+            for ((index, port) in ports.withIndex()) {
+                // Round-robin distribution of ranges
+                val currentRange = if (ranges.isNotEmpty()) ranges[index % ranges.size] else "6000-19999"
+
                 // Construct JSON config EXACTLY like ZIVPN (Single line string template)
-                val configContent = "{\"server\":\"${escapeJson(ip)}:${escapeJson(portRange)}\",\"obfs\":\"${escapeJson(obfs)}\",\"auth\":\"${escapeJson(pass)}\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
+                val configContent = "{\"server\":\"${escapeJson(ip)}:${escapeJson(currentRange)}\",\"obfs\":\"${escapeJson(obfs)}\",\"auth\":\"${escapeJson(pass)}\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
                 
                 // Log the exact command for debugging
-                Log.d("FlClash", "Executing: $libUz -s $obfs --config $configContent")
+                Log.d("FlClash", "Executing Core-$port with Range: $currentRange")
 
                 val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
                 pb.environment()["LD_LIBRARY_PATH"] = nativeDir
