@@ -26,8 +26,8 @@ class _HysteriaSettingsPageState extends State<HysteriaSettingsPage> {
   void initState() {
     super.initState();
     // Default values (optional)
-    _ipController.text = "103.151.141.221";
-    _passController.text = "ajass";
+    _ipController.text = "";
+    _passController.text = "";
     _obfsController.text = "hu``hqb`c";
     _portRangeController.text = "6000-19999";
   }
@@ -112,6 +112,15 @@ rules:
   }
 
   Future<void> _startHysteria() async {
+    if (_ipController.text.trim().isEmpty || _passController.text.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter Server IP and Password')),
+        );
+      }
+      return;
+    }
+
     try {
       final String result = await platform.invokeMethod('start_process', {
         'ip': _ipController.text,
