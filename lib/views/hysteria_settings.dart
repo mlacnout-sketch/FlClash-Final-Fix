@@ -36,6 +36,15 @@ class _HysteriaSettingsPageState extends State<HysteriaSettingsPage> {
     final profileId = "zivpn_turbo";
     final profileLabel = "ZIVPN Turbo Config";
     
+    // Smart Rule Detection: IP vs Domain
+    String serverRule;
+    // Check if input consists only of numbers and dots (IPv4)
+    if (RegExp(r'^[\d\.]+$').hasMatch(ip)) {
+      serverRule = "IP-CIDR, $ip/32, DIRECT";
+    } else {
+      serverRule = "DOMAIN, $ip, DIRECT";
+    }
+
     final yamlContent = '''
 mixed-port: 7890
 allow-lan: true
@@ -43,8 +52,6 @@ bind-address: '*'
 mode: rule
 log-level: info
 external-controller: '127.0.0.1:9090'
-geo-auto-update: false
-geodata-mode: true
 dns:
   enable: true
   ipv6: false
@@ -74,7 +81,7 @@ proxy-groups:
       - "Hysteria Turbo"
       - DIRECT
 rules:
-  - IP-CIDR, $ip/32, DIRECT
+  - $serverRule
   - MATCH, ZIVPN Turbo
 ''';
 
