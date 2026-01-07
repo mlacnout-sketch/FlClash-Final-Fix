@@ -350,10 +350,9 @@ class VpnService : SystemVpnService(), IBaseService,
                 // Construct JSON config in one clear line
                 val configContent = "{\"server\":\"${escapeJson(ip)}:${escapeJson(currentRange)}\",\"obfs\":\"${escapeJson(obfs)}\",\"auth\":\"${escapeJson(pass)}\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
                 
-                val configFile = java.io.File(filesDir, "hysteria_$port.json")
-                configFile.writeText(configContent)
-
-                val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configFile.absolutePath)
+                // FIXED: Pass config content directly as string, matching service_turbo.sh behavior
+                // Also removed writing to file as it's not needed if we pass string
+                val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
                 pb.environment()["LD_LIBRARY_PATH"] = nativeDir
                 val process = pb.start()
                 coreProcesses.add(process)
@@ -365,7 +364,8 @@ class VpnService : SystemVpnService(), IBaseService,
             Thread.sleep(2000)
 
             // Start Load Balancer (Matching ZIVPN Native params)
-            val lbArgs = mutableListOf(libLoad, "-lport", "7777")
+            // FIXED: Added missing "-tunnel" flag
+            val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
             lbArgs.addAll(tunnels)
             val lbPb = ProcessBuilder(lbArgs)
             lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir

@@ -29,7 +29,7 @@ class _HysteriaSettingsPageState extends State<HysteriaSettingsPage> {
     _ipController.text = "103.151.141.221";
     _passController.text = "ajass";
     _obfsController.text = "hu``hqb`c";
-    _portRangeController.text = "13001-16500";
+    _portRangeController.text = "6000-19999";
   }
 
   Future<void> _generateAndApplyProfile(String ip) async {
@@ -66,7 +66,7 @@ proxies:
     type: socks5
     server: 127.0.0.1
     port: 7777
-    udp: false
+    udp: true
 proxy-groups:
   - name: "ZIVPN Turbo"
     type: select
