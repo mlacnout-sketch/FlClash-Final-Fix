@@ -319,30 +319,27 @@ class VpnService : android.net.VpnService(), IBaseService,
 
     private suspend fun startZivpnCores() = withContext(Dispatchers.IO) {
         try {
-            // Extra cleanup before starting to prevent "Address already in use"
+            // Kill existing processes to free ports
             try {
+                // Note: killall might not work for system libs if names match system processes, 
+                // but these are unique enough. 
+                // However, we track process objects now, so this is just a safety net.
                 Runtime.getRuntime().exec("killall libuz.so libload.so")
                 delay(500) 
             } catch (e: Exception) {}
 
-            val binDir = filesDir
+            // Use Native Library Directory (Safe execution on Android 10+)
             val nativeDir = applicationInfo.nativeLibraryDir
             
-            val libUz = java.io.File(binDir, "libuz.so").absolutePath
-            val libLoad = java.io.File(binDir, "libload.so").absolutePath
+            val libUz = java.io.File(nativeDir, "libuz.so").absolutePath
+            val libLoad = java.io.File(nativeDir, "libload.so").absolutePath
 
             if (!java.io.File(libUz).exists()) {
-                Log.e("FlClash", "Binary libuz.so not found at $libUz")
+                Log.e("FlClash", "Native Binary libuz.so not found at $libUz. Ensure it is in jniLibs.")
                 return@withContext
             }
-
-            // FORCE PERMISSION & LOGGING
-            try {
-                Runtime.getRuntime().exec("chmod 777 $libUz").waitFor()
-                Runtime.getRuntime().exec("chmod 777 $libLoad").waitFor()
-            } catch (e: Exception) {
-                Log.e("FlClash", "Failed to chmod binaries: ${e.message}")
-            }
+            
+            // Note: No chmod needed for nativeLibraryDir (it is already r-x)
 
             val prefs = getSharedPreferences("zivpn_config", 4)
             val ip = prefs.getString("ip", "202.10.48.173") ?: "202.10.48.173"
@@ -365,8 +362,8 @@ class VpnService : android.net.VpnService(), IBaseService,
                 // FIXED: Pass config content directly as string, matching service_turbo.sh behavior
                 val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
                 
-                // FIXED: Add both nativeDir AND filesDir to LD_LIBRARY_PATH
-                pb.environment()["LD_LIBRARY_PATH"] = "$nativeDir:${filesDir.absolutePath}"
+                // Use nativeDir for libraries
+                pb.environment()["LD_LIBRARY_PATH"] = nativeDir
                 
                 Log.i("FlClash", "Exec Core-$port: $libUz -s $obfs --config [HIDDEN_JSON]")
 
@@ -384,8 +381,8 @@ class VpnService : android.net.VpnService(), IBaseService,
             val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
             lbArgs.addAll(tunnels)
             val lbPb = ProcessBuilder(lbArgs)
-            // FIXED: Also update LB environment to include filesDir
-            lbPb.environment()["LD_LIBRARY_PATH"] = "$nativeDir:${filesDir.absolutePath}"
+            // Use nativeDir for libraries
+            lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
             
             val lbProcess = lbPb.start()
             coreProcesses.add(lbProcess)

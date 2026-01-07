@@ -33,7 +33,7 @@ class MainActivity : FlutterActivity(),
         super.onCreate(savedInstanceState)
         lifecycleScope.launch {
             State.destroyServiceEngine()
-            extractBinaries()
+            // extractBinaries() // Disabled: Using jniLibs packaging now
         }
     }
 
