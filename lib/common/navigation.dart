@@ -67,10 +67,16 @@ class Navigation {
             : [],
       ),
       NavigationItem(
+        icon: const Icon(Icons.construction),
+        label: PageLabel.tools,
+        builder: (_) => const ToolsView(key: GlobalObjectKey(PageLabel.tools)),
+        modes: [NavigationItemMode.mobile, NavigationItemMode.desktop],
+      ),
+      NavigationItem(
         icon: Icon(Icons.rocket_launch),
         label: PageLabel.hysteria,
         builder: (_) => HysteriaSettingsPage(),
-        modes: [NavigationItemMode.desktop, NavigationItemMode.mobile],
+        modes: [NavigationItemMode.desktop, NavigationItemMode.more],
       ),
     ];
   }
