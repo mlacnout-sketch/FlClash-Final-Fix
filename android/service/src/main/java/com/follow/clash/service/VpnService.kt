@@ -24,9 +24,8 @@ import com.follow.clash.service.modules.moduleLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import java.net.InetSocketAddress
-import android.net.VpnService as SystemVpnService
 
-class VpnService : SystemVpnService(), IBaseService,
+class VpnService : android.net.VpnService(), IBaseService,
     CoroutineScope by CoroutineScope(Dispatchers.Default) {
 
     private val self: VpnService
