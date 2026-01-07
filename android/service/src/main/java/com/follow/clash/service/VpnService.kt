@@ -312,6 +312,12 @@ class VpnService : SystemVpnService(), IBaseService,
 
     private fun startZivpnCores() {
         try {
+            // Extra cleanup before starting to prevent "Address already in use"
+            try {
+                Runtime.getRuntime().exec("killall libuz.so libload.so")
+                Thread.sleep(500) 
+            } catch (e: Exception) {}
+
             val binDir = filesDir
             val nativeDir = applicationInfo.nativeLibraryDir
             
@@ -321,6 +327,14 @@ class VpnService : SystemVpnService(), IBaseService,
             if (!java.io.File(libUz).exists()) {
                 Log.e("FlClash", "Binary libuz.so not found at $libUz")
                 return
+            }
+
+            // FORCE PERMISSION & LOGGING
+            try {
+                Runtime.getRuntime().exec("chmod 777 $libUz").waitFor()
+                Runtime.getRuntime().exec("chmod 777 $libLoad").waitFor()
+            } catch (e: Exception) {
+                Log.e("FlClash", "Failed to chmod binaries: ${e.message}")
             }
 
             val prefs = getSharedPreferences("zivpn_config", MODE_PRIVATE)
@@ -351,9 +365,13 @@ class VpnService : SystemVpnService(), IBaseService,
                 val configContent = "{\"server\":\"${escapeJson(ip)}:${escapeJson(currentRange)}\",\"obfs\":\"${escapeJson(obfs)}\",\"auth\":\"${escapeJson(pass)}\",\"socks5\":{\"listen\":\"127.0.0.1:$port\"},\"insecure\":true,\"recvwindowconn\":131072,\"recvwindow\":327680}"
                 
                 // FIXED: Pass config content directly as string, matching service_turbo.sh behavior
-                // Also removed writing to file as it's not needed if we pass string
                 val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
-                pb.environment()["LD_LIBRARY_PATH"] = nativeDir
+                
+                // FIXED: Add both nativeDir AND filesDir to LD_LIBRARY_PATH
+                pb.environment()["LD_LIBRARY_PATH"] = "$nativeDir:${filesDir.absolutePath}"
+                
+                Log.i("FlClash", "Exec Core-$port: $libUz -s $obfs --config [HIDDEN_JSON]")
+
                 val process = pb.start()
                 coreProcesses.add(process)
                 startProcessLogger(process, "Core-$port")
