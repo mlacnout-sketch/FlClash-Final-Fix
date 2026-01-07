@@ -36,38 +36,48 @@ class _HysteriaSettingsPageState extends State<HysteriaSettingsPage> {
   }
 
   Future<void> _loadProfiles() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? profilesJson = prefs.getString('zivpn_profiles_list');
-    final String? lastId = prefs.getString('zivpn_active_profile_id');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? profilesJson = prefs.getString('zivpn_profiles_list');
+      final String? lastId = prefs.getString('zivpn_active_profile_id');
 
-    if (profilesJson != null) {
-      try {
-        final List<dynamic> decoded = jsonDecode(profilesJson);
-        _profiles = decoded.map((e) => HysteriaProfile.fromJson(e)).toList();
-      } catch (e) {
-        debugPrint("Error parsing profiles: $e");
+      if (profilesJson != null) {
+        try {
+          final List<dynamic> decoded = jsonDecode(profilesJson);
+          _profiles = decoded.map((e) => HysteriaProfile.fromJson(e)).toList();
+        } catch (e) {
+          debugPrint("Error parsing profiles: $e");
+        }
       }
-    }
 
-    if (_profiles.isEmpty) {
-      final defaultProfile = HysteriaProfile(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: "Default Profile",
-      );
-      _profiles.add(defaultProfile);
-      _saveProfilesToDisk();
-    }
+      if (_profiles.isEmpty) {
+        final defaultProfile = HysteriaProfile(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: "Default Profile",
+        );
+        _profiles.add(defaultProfile);
+        // Removed _saveProfilesToDisk() to prevent I/O blocking during init
+      }
 
-    if (lastId != null && _profiles.any((p) => p.id == lastId)) {
-      _selectProfile(lastId!);
-    } else {
-      _selectProfile(_profiles.first.id);
-    }
-    
-    if (mounted) {
+      if (lastId != null && _profiles.any((p) => p.id == lastId)) {
+        _selectProfile(lastId!);
+      } else {
+        _selectProfile(_profiles.first.id);
+      }
+    } catch (e) {
+      debugPrint("Critical error loading profiles: $e");
+      // Fallback mechanism
+      if (_profiles.isEmpty) {
+         final fallback = HysteriaProfile(id: "fallback", name: "Default");
+         _profiles.add(fallback);
+         _selectProfile(fallback.id);
+      }
+    } finally {
+      if (mounted) {
         setState(() {
           _isLoading = false;
         });
+      }
     }
   }
 
