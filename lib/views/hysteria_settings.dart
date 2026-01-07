@@ -119,13 +119,50 @@ rules:
   }
 
   Future<void> _startHysteria() async {
-    if (_ipController.text.trim().isEmpty || _passController.text.trim().isEmpty) {
+    String currentIp = _ipController.text.trim();
+    final String password = _passController.text.trim();
+
+    if (currentIp.isEmpty || password.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please enter Server IP and Password')),
         );
       }
       return;
+    }
+
+    // Logic Host-to-IP: Resolve Domain to IPv4
+    final isIpFormat = RegExp(r'^[\d\.]+$').hasMatch(currentIp);
+    if (!isIpFormat) {
+      try {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Resolving Host to IP...')),
+          );
+        }
+        
+        final List<InternetAddress> result = await InternetAddress.lookup(currentIp);
+        if (result.isNotEmpty && result[0].type == InternetAddressType.IPv4) {
+          final resolvedIp = result[0].address;
+          setState(() {
+            _ipController.text = resolvedIp;
+          });
+          currentIp = resolvedIp; // Update local variable for next steps
+          
+          if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Resolved: $resolvedIp')),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text('DNS Error: Failed to resolve $currentIp')),
+          );
+        }
+        return; // Stop execution if resolve fails
+      }
     }
 
     try {
