@@ -240,18 +240,11 @@ rules:
 
   Future<void> _viewLogs() async {
     try {
-      final appDocDir = await appPath.getApplicationSupportDirectory();
-      // Android path: /data/user/0/com.follow.clash/files/zivpn_logs/zivpn_core.log
-      // appPath.getApplicationSupportDirectory() usually returns files dir parent or similar.
-      // Let's try constructing the path based on standard Android files structure relative to what we know.
-      // Actually, better to use MethodChannel to read it if paths are tricky, but let's try direct read first.
+      final appDocPath = await appPath.homeDirPath;
+      // appDocPath is usually .../files
+      final logFile = File('$appDocPath/zivpn_logs/zivpn_core.log');
       
-      // Note: 'filesDir' in Android corresponds to getApplicationSupportDirectory in path_provider (mostly).
-      // Let's check common locations.
-      
-      final logFile = File('${appDocDir.parent.path}/files/zivpn_logs/zivpn_core.log');
-      
-      String content = "Log file not found.";
+      String content = "Log file not found at $appDocPath/zivpn_logs/zivpn_core.log";
       if (await logFile.exists()) {
         content = await logFile.readAsString();
       }
@@ -283,8 +276,8 @@ rules:
 
   Future<void> _clearLogs() async {
      try {
-      final appDocDir = await appPath.getApplicationSupportDirectory();
-      final logFile = File('${appDocDir.parent.path}/files/zivpn_logs/zivpn_core.log');
+      final appDocPath = await appPath.homeDirPath;
+      final logFile = File('$appDocPath/zivpn_logs/zivpn_core.log');
       if (await logFile.exists()) {
         await logFile.writeAsString("");
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Logs cleared")));
