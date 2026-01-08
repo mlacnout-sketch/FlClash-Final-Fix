@@ -115,10 +115,11 @@ rules:
   }
 
   Future<void> _startHysteria() async {
-    String currentIp = _ipController.text.trim();
+    final String originalInput = _ipController.text.trim();
+    String connectIp = originalInput;
     final String password = _passController.text.trim();
 
-    if (currentIp.isEmpty || password.isEmpty) {
+    if (originalInput.isEmpty || password.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please enter Server IP and Password')),
@@ -127,8 +128,8 @@ rules:
       return;
     }
 
-    // Logic Host-to-IP: Resolve Domain to IPv4
-    final isIpFormat = RegExp(r'^[\d\.]+').hasMatch(currentIp);
+    // Logic Host-to-IP: Resolve Domain to IPv4 for Binary ONLY
+    final isIpFormat = RegExp(r'^[\d\.]+').hasMatch(originalInput);
     if (!isIpFormat) {
       try {
         if (mounted) {
@@ -137,24 +138,21 @@ rules:
           );
         }
         
-        final List<InternetAddress> result = await InternetAddress.lookup(currentIp);
+        final List<InternetAddress> result = await InternetAddress.lookup(originalInput);
         if (result.isNotEmpty && result[0].type == InternetAddressType.IPv4) {
-          final resolvedIp = result[0].address;
-          setState(() {
-            _ipController.text = resolvedIp;
-          });
-          currentIp = resolvedIp;
+          connectIp = result[0].address;
+          // We do NOT update the UI textfield to keep the domain visible
           
           if (mounted) {
              ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Resolved: $resolvedIp')),
+              SnackBar(content: Text('Resolved to: $connectIp')),
             );
           }
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-             SnackBar(content: Text('DNS Error: Failed to resolve $currentIp'))
+             SnackBar(content: Text('DNS Error: Failed to resolve $originalInput'))
           );
         }
         return;
@@ -162,15 +160,17 @@ rules:
     }
 
     try {
+      // 1. Start Binary using Resolved IP (Critical for Hysteria)
       final String result = await platform.invokeMethod('start_process', {
-        'ip': currentIp,
+        'ip': connectIp,
         'pass': _passController.text,
         'obfs': _obfsController.text,
         'port_range': _portRangeController.text,
       });
 
+      // 2. Generate Profile using ORIGINAL Input (Preserve Domain rule)
       if (_autoGenerateProfile) {
-        await _generateAndApplyProfile(currentIp);
+        await _generateAndApplyProfile(originalInput);
       }
 
       if (mounted) {
