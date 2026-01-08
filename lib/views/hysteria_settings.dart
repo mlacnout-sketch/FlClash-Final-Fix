@@ -32,19 +32,58 @@ class _HysteriaSettingsPageState extends State<HysteriaSettingsPage> {
     _portRangeController.text = "6000-19999";
   }
 
-  Future<void> _generateAndApplyProfile(String ip) async {
+  Future<void> _generateAndApplyProfile(String host) async {
     final profileId = "zivpn_turbo";
     final profileLabel = "ZIVPN Turbo Config";
     
-    // Smart Rule Detection: IP vs Domain
-    String serverRule;
-    if (RegExp(r'^[\d\.]+').hasMatch(ip)) {
-      serverRule = "IP-CIDR, $ip/32, DIRECT";
-    } else {
-      serverRule = "DOMAIN, $ip, DIRECT";
-    }
+    final bool isIp = RegExp(r'^[\d\.]+$').hasMatch(host);
+    String yamlContent;
 
-    final yamlContent = '''
+    if (!isIp) {
+      // Logic for DOMAIN Input: Use TCP Optimized Config (Anti-Timeout/Zero Quota)
+      yamlContent = '''
+# Clash Config (TCP Optimized)
+port: 7890
+socks-port: 7891
+redir-port: 7892
+allow-lan: false
+mode: rule
+log-level: debug
+external-controller: 127.0.0.1:9090
+
+proxies:
+  - name: "ZIVPN-Core"
+    type: socks5
+    server: 127.0.0.1
+    port: 7777
+    udp: false # Force TCP for SOCKS5 bridge
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - "ZIVPN-Core"
+
+rules:
+  - MATCH,PROXY
+
+dns:
+  enable: true
+  ipv6: false
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  # Use DoH (HTTPS) to bypass UDP blocks/zero quota issues
+  nameserver:
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
+  fallback:
+    - https://1.0.0.1/dns-query
+    - https://8.8.4.4/dns-query
+''';
+    } else {
+      // Logic for IP Input: Standard Config with Bypass Rule
+      yamlContent = '''
 mixed-port: 7890
 allow-lan: true
 bind-address: '*'
@@ -60,13 +99,6 @@ dns:
   nameserver:
     - https://1.1.1.1/dns-query
     - https://8.8.8.8/dns-query
-  fallback:
-    - https://1.0.0.1/dns-query
-    - https://8.8.4.4/dns-query
-  fallback-filter:
-    geoip: false
-    ipcidr:
-      - 240.0.0.0/4
 proxies:
   - name: "Hysteria Turbo"
     type: socks5
@@ -80,9 +112,10 @@ proxy-groups:
       - "Hysteria Turbo"
       - DIRECT
 rules:
-  - $serverRule
+  - IP-CIDR, $host/32, DIRECT
   - MATCH, ZIVPN Turbo
 ''';
+    }
 
     try {
       final profilePath = await appPath.getProfilePath(profileId);
