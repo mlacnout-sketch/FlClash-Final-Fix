@@ -34,7 +34,7 @@ class GlobalState {
   Timer? groupsUpdateTimer;
   late Config config;
   late AppState appState;
-  bool isPre = true;
+  bool isPre = false;
   String? coreSHA256;
   late PackageInfo packageInfo;
   Function? updateCurrentDelayDebounce;
