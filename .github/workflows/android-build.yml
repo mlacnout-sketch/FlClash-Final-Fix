@@ -2,7 +2,7 @@ name: Android Build
 
 on:
   push:
-    branches: [ "main", "restore-settings-menu" ]
+    branches: [ "main", "restore-settings-menu", "feature/custom-mtu" ]
   workflow_dispatch:
 
 concurrency:
