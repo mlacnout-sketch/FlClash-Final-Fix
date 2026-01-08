@@ -204,7 +204,13 @@ class VpnService : android.net.VpnService(), IBaseService,
             if (options.ipv6) {
                 addDnsServer(DNS6)
             }
-            setMtu(9000)
+            
+            // Dynamic MTU from Settings
+            val prefs = getSharedPreferences("zivpn_config", 4)
+            val mtu = prefs.getString("mtu", "9000")?.toIntOrNull() ?: 9000
+            setMtu(mtu)
+            Log.d("FlClash", "VPN Interface configured with MTU: $mtu")
+
             options.accessControl.let { accessControl ->
                 if (accessControl.enable) {
                     when (accessControl.mode) {
