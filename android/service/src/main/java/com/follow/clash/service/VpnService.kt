@@ -325,33 +325,31 @@ class VpnService : android.net.VpnService(), IBaseService,
 
     private suspend fun startZivpnCores() = withContext(Dispatchers.IO) {
         try {
-            // Smart Cleanup: Stop existing objects first
+            // 1. CLEANUP PHASE
             stopZivpnCores()
-            
-            // Force Kill & Wait: Ensure ports are released
+            // Force Kill everything matching the binary names to be 100% sure
             try {
-                // killall -9 ensures stubborn processes die. waitFor() ensures we don't proceed until they are dead.
-                Runtime.getRuntime().exec("killall -9 libuz.so libload.so").waitFor()
-                delay(200) // Extra buffer for OS kernel to release sockets
+                Runtime.getRuntime().exec("pkill -9 -f libuz.so").waitFor()
+                Runtime.getRuntime().exec("pkill -9 -f libload.so").waitFor()
             } catch (e: Exception) {}
-
-            // Use Native Library Directory (Safe execution on Android 10+)
-            val nativeDir = applicationInfo.nativeLibraryDir
             
+            // Give OS time to release sockets (TIME_WAIT state)
+            delay(500) 
+
+            // 2. SETUP PHASE
+            val nativeDir = applicationInfo.nativeLibraryDir
             val libUz = java.io.File(nativeDir, "libuz.so").absolutePath
             val libLoad = java.io.File(nativeDir, "libload.so").absolutePath
 
             if (!java.io.File(libUz).exists()) {
-                Log.e("FlClash", "Native Binary libuz.so not found at $libUz. Ensure it is in jniLibs.")
+                Log.e("FlClash", "Native Binary libuz.so not found at $libUz")
                 return@withContext
             }
-            
-            // Note: No chmod needed for nativeLibraryDir (it is already r-x)
 
             val prefs = getSharedPreferences("zivpn_config", 4)
-            val ip = prefs.getString("ip", "202.10.48.173") ?: "202.10.48.173"
-            val pass = prefs.getString("pass", "asd63") ?: "asd63"
-            val obfs = prefs.getString("obfs", "hu``hqb`c") ?: "hu``hqb`c"
+            val ip = prefs.getString("ip", "") ?: ""
+            val pass = prefs.getString("pass", "") ?: ""
+            val obfs = prefs.getString("obfs", "hu``hqb`c") ?: ""
             val portRange = prefs.getString("port_range", "6000-19999") ?: "6000-19999"
 
             Log.i("FlClash", "Starting ZIVPN Cores with IP: $ip, Range: $portRange")
@@ -360,35 +358,28 @@ class VpnService : android.net.VpnService(), IBaseService,
             val ports = listOf(1080, 1081, 1082, 1083)
             val ranges = portRange.split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
+            // 3. EXECUTION PHASE (With Retry)
+            // We start cores sequentially to avoid CPU spikes and race conditions
             for ((index, port) in ports.withIndex()) {
                 val currentRange = if (ranges.isNotEmpty()) ranges[index % ranges.size] else "6000-19999"
-                
-                // MATCH ZIVPN NATIVE: Use Triple Quote Raw String for 100% safety
                 val configContent = """{"server":"$ip:$currentRange","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":131072,"recvwindow":327680}"""
                 
-                // FIXED: Pass config content directly as string, matching service_turbo.sh behavior
                 val pb = ProcessBuilder(libUz, "-s", obfs, "--config", configContent)
-                
-                // Use nativeDir for libraries
                 pb.environment()["LD_LIBRARY_PATH"] = nativeDir
                 
-                Log.i("FlClash", "Exec Core-$port: $libUz -s $obfs --config [HIDDEN_JSON]")
-
                 val process = pb.start()
                 coreProcesses.add(process)
                 startProcessLogger(process, "Core-$port")
                 tunnels.add("127.0.0.1:$port")
+                delay(100) // Small staggering
             }
 
-            // Wait for cores to initialize (Critical for success)
-            delay(2000)
+            delay(1000) // Wait for cores to bind ports
 
-            // Start Load Balancer (Matching ZIVPN Native params)
-            // FIXED: Added missing "-tunnel" flag
+            // Start Load Balancer
             val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
             lbArgs.addAll(tunnels)
             val lbPb = ProcessBuilder(lbArgs)
-            // Use nativeDir for libraries
             lbPb.environment()["LD_LIBRARY_PATH"] = nativeDir
             
             val lbProcess = lbPb.start()
