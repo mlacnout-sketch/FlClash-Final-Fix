@@ -158,6 +158,10 @@ rules:
       final fullPath = "$profilesPath/$profileFilename";
       
       final file = File(fullPath);
+      // Fix: Ensure parent directory exists and create file recursively
+      if (!await file.exists()) {
+        await file.create(recursive: true);
+      }
       await file.writeAsString(yamlContent);
 
       // 4. Reload Profiles
