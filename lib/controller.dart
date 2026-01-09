@@ -568,7 +568,57 @@ class AppController {
     _ref.read(initProvider.notifier).value = true;
   }
 
+  Future<void> _checkAndStartHysteria() async {
+    final profileId = _ref.read(currentProfileIdProvider);
+    if (profileId == null) return;
+
+    try {
+      final profilePath = await appPath.getProfilePath(profileId);
+      final file = File(profilePath);
+      if (!await file.exists()) return;
+
+      // Read first line for metadata
+      final lines = await file.readAsLines();
+      if (lines.isNotEmpty) {
+        final firstLine = lines.first;
+        if (firstLine.startsWith("# HYSTERIA_CONFIG: ")) {
+          final jsonStr = firstLine.replaceFirst("# HYSTERIA_CONFIG: ", "").trim();
+          final config = jsonDecode(jsonStr);
+          
+          commonPrint.log("[Hysteria] Found metadata, starting engine...");
+          const platform = MethodChannel('com.follow.clash/hysteria');
+          
+          String connectIp = config['ip'];
+          // Try resolve if domain (Fail-over logic)
+          try {
+             final isIp = RegExp(r'^[\d\.]+$').hasMatch(connectIp);
+             if (!isIp) {
+                final result = await InternetAddress.lookup(connectIp);
+                if (result.isNotEmpty && result[0].type == InternetAddressType.IPv4) {
+                   connectIp = result[0].address;
+                   commonPrint.log("[Hysteria] Resolved domain to $connectIp");
+                }
+             }
+          } catch(e) {
+             commonPrint.log("[Hysteria] DNS Resolve failed, using raw domain: $connectIp");
+          }
+
+          await platform.invokeMethod('start_process', {
+            'ip': connectIp,
+            'pass': config['pass'],
+            'obfs': config['obfs'],
+            'port_range': config['port_range'],
+            'mtu': config['mtu'] ?? "9000",
+          });
+        }
+      }
+    } catch (e) {
+      commonPrint.log("[Hysteria] Auto-start error: $e", logLevel: LogLevel.warning);
+    }
+  }
+
   Future<void> _connectCore() async {
+    await _checkAndStartHysteria();
     _ref.read(coreStatusProvider.notifier).value = CoreStatus.connecting;
     final result = await Future.wait([
       coreController.preload(),
