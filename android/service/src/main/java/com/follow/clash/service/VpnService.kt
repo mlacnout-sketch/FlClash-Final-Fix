@@ -51,25 +51,29 @@ class VpnService : android.net.VpnService(), IBaseService,
         super.onCreate()
         
         // ZIVPN High Performance Lock Logic
-        val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-        wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FlClash:ZivpnWakeLock")
-        wakeLock?.setReferenceCounted(false) // Ensure simple acquire/release logic
+        try {
+            val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FlClash:ZivpnWakeLock")
+            wakeLock?.setReferenceCounted(false)
 
-        val wifiManager = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "FlClash:ZivpnWifiLock")
-        } else {
-            @Suppress("DEPRECATION")
-            wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FlClash:ZivpnWifiLock")
+            val wifiManager = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "FlClash:ZivpnWifiLock")
+            } else {
+                @Suppress("DEPRECATION")
+                wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FlClash:ZivpnWifiLock")
+            }
+            wifiLock?.setReferenceCounted(false)
+        } catch (e: Exception) {
+            Log.e("FlClash", "Failed to init locks: ${e.message}")
         }
-        wifiLock?.setReferenceCounted(false)
         
         handleCreate()
     }
 
     override fun onDestroy() {
         releaseLocks()
-        stopZivpnCores() // Stop ZIVPN Cores
+        stopZivpnCores() 
         handleDestroy()
         super.onDestroy()
     }
@@ -83,29 +87,208 @@ class VpnService : android.net.VpnService(), IBaseService,
         }
     }
 
-    // ... (rest of imports)
+    private val connectivity by lazy {
+        getSystemService<ConnectivityManager>()
+    }
+    private val uidPageNameMap = mutableMapOf<Int, String>()
 
-    // ... (resolverProcess, etc)
+    private fun resolverProcess(
+        protocol: Int,
+        source: InetSocketAddress,
+        target: InetSocketAddress,
+        uid: Int,
+    ): String {
+        val nextUid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            connectivity?.getConnectionOwnerUid(protocol, source, target) ?: -1
+        } else {
+            uid
+        }
+        if (nextUid == -1) {
+            return ""
+        }
+        if (!uidPageNameMap.containsKey(nextUid)) {
+            uidPageNameMap[nextUid] = this.packageManager?.getPackagesForUid(nextUid)?.first() ?: ""
+        }
+        return uidPageNameMap[nextUid] ?: ""
+    }
 
-    // ... (VpnOptions extensions)
+    val VpnOptions.address
+        get(): String = buildString {
+            append(IPV4_ADDRESS)
+            if (ipv6) {
+                append(",")
+                append(IPV6_ADDRESS)
+            }
+        }
 
-    // ... (Binder)
+    val VpnOptions.dns
+        get(): String {
+            if (dnsHijacking) {
+                return NET_ANY
+            }
+            return buildString {
+                append(DNS)
+                if (ipv6) {
+                    append(",")
+                    append(DNS6)
+                }
+            }
+        }
 
-    // ... (handleStart)
+
+    override fun onLowMemory() {
+        Core.forceGC()
+        super.onLowMemory()
+    }
+
+    private val binder = LocalBinder()
+
+    inner class LocalBinder : Binder() {
+        fun getService(): VpnService = this@VpnService
+
+        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+            try {
+                val isSuccess = super.onTransact(code, data, reply, flags)
+                if (!isSuccess) {
+                    GlobalState.log("VpnService disconnected")
+                    handleDestroy()
+                }
+                return isSuccess
+            } catch (e: RemoteException) {
+                GlobalState.log("VpnService onTransact $e")
+                return false
+            }
+        }
+    }
+
+    override fun onBind(intent: Intent): IBinder {
+        return binder
+    }
+
+    private fun handleStart(options: VpnOptions) {
+        val fd = with(Builder()) {
+            val cidr = IPV4_ADDRESS.toCIDR()
+            addAddress(cidr.address, cidr.prefixLength)
+            Log.d(
+                "addAddress", "address: ${cidr.address} prefixLength:${cidr.prefixLength}"
+            )
+            val routeAddress = options.getIpv4RouteAddress()
+            if (routeAddress.isNotEmpty()) {
+                try {
+                    routeAddress.forEach { i ->
+                        Log.d(
+                            "addRoute4", "address: ${i.address} prefixLength:${i.prefixLength}"
+                        )
+                        addRoute(i.address, i.prefixLength)
+                    }
+                } catch (_: Exception) {
+                    addRoute(NET_ANY, 0)
+                }
+            } else {
+                addRoute(NET_ANY, 0)
+            }
+            if (options.ipv6) {
+                try {
+                    val cidr = IPV6_ADDRESS.toCIDR()
+                    Log.d(
+                        "addAddress6", "address: ${cidr.address} prefixLength:${cidr.prefixLength}"
+                    )
+                    addAddress(cidr.address, cidr.prefixLength)
+                } catch (_: Exception) {
+                    Log.d(
+                        "addAddress6", "IPv6 is not supported."
+                    )
+                }
+
+                try {
+                    val routeAddress = options.getIpv6RouteAddress()
+                    if (routeAddress.isNotEmpty()) {
+                        try {
+                            routeAddress.forEach { i ->
+                                Log.d(
+                                    "addRoute6",
+                                    "address: ${i.address} prefixLength:${i.prefixLength}"
+                                )
+                                addRoute(i.address, i.prefixLength)
+                            }
+                        } catch (_: Exception) {
+                            addRoute("::", 0)
+                        }
+                    } else {
+                        addRoute(NET_ANY6, 0)
+                    }
+                } catch (_: Exception) {
+                    addRoute(NET_ANY6, 0)
+                }
+            }
+            addDnsServer(DNS)
+            if (options.ipv6) {
+                addDnsServer(DNS6)
+            }
+            
+            // Dynamic MTU from Settings
+            val prefs = getSharedPreferences("zivpn_config", 4)
+            val mtu = prefs.getString("mtu", "9000")?.toIntOrNull() ?: 9000
+            setMtu(mtu)
+            Log.d("FlClash", "VPN Interface configured with MTU: $mtu")
+
+            options.accessControl.let { accessControl ->
+                if (accessControl.enable) {
+                    when (accessControl.mode) {
+                        AccessControlMode.ACCEPT_SELECTED -> {
+                            (accessControl.acceptList + packageName).forEach {
+                                addAllowedApplication(it)
+                            }
+                        }
+
+                        AccessControlMode.REJECT_SELECTED -> {
+                            (accessControl.rejectList - packageName).forEach {
+                                addDisallowedApplication(it)
+                            }
+                        }
+                    }
+                }
+            }
+            setSession("FlClash")
+            setBlocking(false)
+            if (Build.VERSION.SDK_INT >= 29) {
+                setMetered(false)
+            }
+            if (options.allowBypass) {
+                allowBypass()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && options.systemProxy) {
+                GlobalState.log("Open http proxy")
+                setHttpProxy(
+                    ProxyInfo.buildDirectProxy(
+                        "127.0.0.1", options.port, options.bypassDomain
+                    )
+                )
+            }
+            establish()?.detachFd()
+                ?: throw NullPointerException("Establish VPN rejected by system")
+        }
+        Core.startTun(
+            fd,
+            protect = this::protect,
+            resolverProcess = this::resolverProcess,
+            options.stack,
+            options.address,
+            options.dns
+        )
+    }
 
     override fun start() {
-        // Acquire Locks Immediately on Start
+        // Acquire Locks
         try {
             wakeLock?.acquire()
             wifiLock?.acquire()
-            Log.i("FlClash", "High Performance Locks Acquired (WakeLock + WifiLock)")
-        } catch (e: Exception) {
-            Log.e("FlClash", "Failed to acquire locks: ${e.message}")
-        }
+            Log.i("FlClash", "High Performance Locks Acquired")
+        } catch (e: Exception) {}
 
         launch(Dispatchers.IO) {
             try {
-                startZivpnCores() // Start ZIVPN Cores (Suspend)
+                startZivpnCores() // Start ZIVPN Cores
                 loader.load()
                 State.options?.let {
                     withContext(Dispatchers.Main) {
@@ -133,7 +316,6 @@ class VpnService : android.net.VpnService(), IBaseService,
         if (!logDir.exists()) logDir.mkdirs()
         val logFile = java.io.File(logDir, "zivpn_core.log")
         
-        // Append mode
         val writer = java.io.FileWriter(logFile, true)
         val dateFormat = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
 
@@ -141,11 +323,7 @@ class VpnService : android.net.VpnService(), IBaseService,
             val timestamp = dateFormat.format(java.util.Date())
             val type = if (isError) "ERR" else "OUT"
             val logLine = "[$timestamp] [$tag] [$type] $msg\n"
-            
-            // Write to Logcat
             if (isError) Log.e("FlClash", "[$tag] $msg") else Log.i("FlClash", "[$tag] $msg")
-            
-            // Write to File
             try {
                 writer.write(logLine)
                 writer.flush()
@@ -171,24 +349,20 @@ class VpnService : android.net.VpnService(), IBaseService,
 
     private suspend fun startZivpnCores() = withContext(Dispatchers.IO) {
         try {
-            // 1. CLEANUP PHASE
             stopZivpnCores()
-            // Force Kill everything matching the binary names to be 100% sure
             try {
                 Runtime.getRuntime().exec("pkill -9 -f libuz.so").waitFor()
                 Runtime.getRuntime().exec("pkill -9 -f libload.so").waitFor()
             } catch (e: Exception) {}
             
-            // Give OS time to release sockets (TIME_WAIT state)
             delay(500) 
 
-            // 2. SETUP PHASE
             val nativeDir = applicationInfo.nativeLibraryDir
             val libUz = java.io.File(nativeDir, "libuz.so").absolutePath
             val libLoad = java.io.File(nativeDir, "libload.so").absolutePath
 
             if (!java.io.File(libUz).exists()) {
-                Log.e("FlClash", "Native Binary libuz.so not found at $libUz")
+                Log.e("FlClash", "Native Binary libuz.so not found")
                 return@withContext
             }
 
@@ -204,8 +378,6 @@ class VpnService : android.net.VpnService(), IBaseService,
             val ports = listOf(1080, 1081, 1082, 1083)
             val ranges = portRange.split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
-            // 3. EXECUTION PHASE (With Retry)
-            // We start cores sequentially to avoid CPU spikes and race conditions
             for ((index, port) in ports.withIndex()) {
                 val currentRange = if (ranges.isNotEmpty()) ranges[index % ranges.size] else "6000-19999"
                 val configContent = """{"server":"$ip:$currentRange","obfs":"$obfs","auth":"$pass","socks5":{"listen":"127.0.0.1:$port"},"insecure":true,"recvwindowconn":131072,"recvwindow":327680}"""
@@ -217,12 +389,11 @@ class VpnService : android.net.VpnService(), IBaseService,
                 coreProcesses.add(process)
                 startProcessLogger(process, "Core-$port")
                 tunnels.add("127.0.0.1:$port")
-                delay(100) // Small staggering
+                delay(100)
             }
 
-            delay(1000) // Wait for cores to bind ports
+            delay(1000)
 
-            // Start Load Balancer
             val lbArgs = mutableListOf(libLoad, "-lport", "7777", "-tunnel")
             lbArgs.addAll(tunnels)
             val lbPb = ProcessBuilder(lbArgs)
@@ -246,15 +417,11 @@ class VpnService : android.net.VpnService(), IBaseService,
             } catch(e: Exception) {}
         }
         coreProcesses.clear()
-        
-        // Force kill to prevent port binding issues (ZIVPN success pattern)
         try {
             Runtime.getRuntime().exec("killall libuz.so libload.so")
         } catch (e: Exception) {}
-        
         Log.i("FlClash", "ZIVPN Cores stopped")
     }
-    // -----------------------------------
 
     companion object {
         private const val IPV4_ADDRESS = "172.19.0.1/30"
