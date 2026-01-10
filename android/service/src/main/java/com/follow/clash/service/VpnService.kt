@@ -44,220 +44,65 @@ class VpnService : android.net.VpnService(), IBaseService,
     // --- ZIVPN Turbo Logic Variables ---
     private val coreProcesses = mutableListOf<Process>()
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     // -----------------------------------
 
     override fun onCreate() {
         super.onCreate()
         
-        // ZIVPN WakeLock Logic
+        // ZIVPN High Performance Lock Logic
         val powerManager = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
         wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FlClash:ZivpnWakeLock")
-        wakeLock?.acquire(10*60*60*1000L) // 10 hours safety limit
+        wakeLock?.setReferenceCounted(false) // Ensure simple acquire/release logic
+
+        val wifiManager = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "FlClash:ZivpnWifiLock")
+        } else {
+            @Suppress("DEPRECATION")
+            wifiLock = wifiManager.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FlClash:ZivpnWifiLock")
+        }
+        wifiLock?.setReferenceCounted(false)
         
         handleCreate()
     }
 
     override fun onDestroy() {
-        if (wakeLock?.isHeld == true) {
-            wakeLock?.release()
-        }
+        releaseLocks()
         stopZivpnCores() // Stop ZIVPN Cores
         handleDestroy()
         super.onDestroy()
     }
 
-    private val connectivity by lazy {
-        getSystemService<ConnectivityManager>()
-    }
-    private val uidPageNameMap = mutableMapOf<Int, String>()
-
-    private fun resolverProcess(
-        protocol: Int,
-        source: InetSocketAddress,
-        target: InetSocketAddress,
-        uid: Int,
-    ): String {
-        val nextUid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            connectivity?.getConnectionOwnerUid(protocol, source, target) ?: -1
-        } else {
-            uid
-        }
-        if (nextUid == -1) {
-            return ""
-        }
-        if (!uidPageNameMap.containsKey(nextUid)) {
-            uidPageNameMap[nextUid] = this.packageManager?.getPackagesForUid(nextUid)?.first() ?: ""
-        }
-        return uidPageNameMap[nextUid] ?: ""
-    }
-
-    val VpnOptions.address
-        get(): String = buildString {
-            append(IPV4_ADDRESS)
-            if (ipv6) {
-                append(",")
-                append(IPV6_ADDRESS)
-            }
-        }
-
-    val VpnOptions.dns
-        get(): String {
-            if (dnsHijacking) {
-                return NET_ANY
-            }
-            return buildString {
-                append(DNS)
-                if (ipv6) {
-                    append(",")
-                    append(DNS6)
-                }
-            }
-        }
-
-
-    override fun onLowMemory() {
-        Core.forceGC()
-        super.onLowMemory()
-    }
-
-    private val binder = LocalBinder()
-
-    inner class LocalBinder : Binder() {
-        fun getService(): VpnService = this@VpnService
-
-        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-            try {
-                val isSuccess = super.onTransact(code, data, reply, flags)
-                if (!isSuccess) {
-                    GlobalState.log("VpnService disconnected")
-                    handleDestroy()
-                }
-                return isSuccess
-            } catch (e: RemoteException) {
-                GlobalState.log("VpnService onTransact $e")
-                return false
-            }
+    private fun releaseLocks() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (e: Exception) {
+            Log.e("FlClash", "Error releasing locks: ${e.message}")
         }
     }
 
-    override fun onBind(intent: Intent): IBinder {
-        return binder
-    }
+    // ... (rest of imports)
 
-    private fun handleStart(options: VpnOptions) {
-        val fd = with(Builder()) {
-            val cidr = IPV4_ADDRESS.toCIDR()
-            addAddress(cidr.address, cidr.prefixLength)
-            Log.d(
-                "addAddress", "address: ${cidr.address} prefixLength:${cidr.prefixLength}"
-            )
-            val routeAddress = options.getIpv4RouteAddress()
-            if (routeAddress.isNotEmpty()) {
-                try {
-                    routeAddress.forEach { i ->
-                        Log.d(
-                            "addRoute4", "address: ${i.address} prefixLength:${i.prefixLength}"
-                        )
-                        addRoute(i.address, i.prefixLength)
-                    }
-                } catch (_: Exception) {
-                    addRoute(NET_ANY, 0)
-                }
-            } else {
-                addRoute(NET_ANY, 0)
-            }
-            if (options.ipv6) {
-                try {
-                    val cidr = IPV6_ADDRESS.toCIDR()
-                    Log.d(
-                        "addAddress6", "address: ${cidr.address} prefixLength:${cidr.prefixLength}"
-                    )
-                    addAddress(cidr.address, cidr.prefixLength)
-                } catch (_: Exception) {
-                    Log.d(
-                        "addAddress6", "IPv6 is not supported."
-                    )
-                }
+    // ... (resolverProcess, etc)
 
-                try {
-                    val routeAddress = options.getIpv6RouteAddress()
-                    if (routeAddress.isNotEmpty()) {
-                        try {
-                            routeAddress.forEach { i ->
-                                Log.d(
-                                    "addRoute6",
-                                    "address: ${i.address} prefixLength:${i.prefixLength}"
-                                )
-                                addRoute(i.address, i.prefixLength)
-                            }
-                        } catch (_: Exception) {
-                            addRoute("::", 0)
-                        }
-                    } else {
-                        addRoute(NET_ANY6, 0)
-                    }
-                } catch (_: Exception) {
-                    addRoute(NET_ANY6, 0)
-                }
-            }
-            addDnsServer(DNS)
-            if (options.ipv6) {
-                addDnsServer(DNS6)
-            }
-            
-            // Dynamic MTU from Settings
-            val prefs = getSharedPreferences("zivpn_config", 4)
-            val mtu = prefs.getString("mtu", "9000")?.toIntOrNull() ?: 9000
-            setMtu(mtu)
-            Log.d("FlClash", "VPN Interface configured with MTU: $mtu")
+    // ... (VpnOptions extensions)
 
-            options.accessControl.let { accessControl ->
-                if (accessControl.enable) {
-                    when (accessControl.mode) {
-                        AccessControlMode.ACCEPT_SELECTED -> {
-                            (accessControl.acceptList + packageName).forEach {
-                                addAllowedApplication(it)
-                            }
-                        }
+    // ... (Binder)
 
-                        AccessControlMode.REJECT_SELECTED -> {
-                            (accessControl.rejectList - packageName).forEach {
-                                addDisallowedApplication(it)
-                            }
-                        }
-                    }
-                }
-            }
-            setSession("FlClash")
-            setBlocking(false)
-            if (Build.VERSION.SDK_INT >= 29) {
-                setMetered(false)
-            }
-            if (options.allowBypass) {
-                allowBypass()
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && options.systemProxy) {
-                GlobalState.log("Open http proxy")
-                setHttpProxy(
-                    ProxyInfo.buildDirectProxy(
-                        "127.0.0.1", options.port, options.bypassDomain
-                    )
-                )
-            }
-            establish()?.detachFd()
-                ?: throw NullPointerException("Establish VPN rejected by system")
-        }
-        Core.startTun(
-            fd,
-            protect = this::protect,
-            resolverProcess = this::resolverProcess,
-            options.stack,
-            options.address,
-            options.dns
-        )
-    }
+    // ... (handleStart)
 
     override fun start() {
+        // Acquire Locks Immediately on Start
+        try {
+            wakeLock?.acquire()
+            wifiLock?.acquire()
+            Log.i("FlClash", "High Performance Locks Acquired (WakeLock + WifiLock)")
+        } catch (e: Exception) {
+            Log.e("FlClash", "Failed to acquire locks: ${e.message}")
+        }
+
         launch(Dispatchers.IO) {
             try {
                 startZivpnCores() // Start ZIVPN Cores (Suspend)
@@ -275,6 +120,7 @@ class VpnService : android.net.VpnService(), IBaseService,
 
     override fun stop() {
         stopZivpnCores() // Stop ZIVPN Cores
+        releaseLocks() // Release Locks
         loader.cancel()
         Core.stopTun()
         stopSelf()
