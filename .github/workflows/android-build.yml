@@ -2,7 +2,7 @@ name: Android Build
 
 on:
   push:
-    branches: [ "main", "restore-settings-menu", "feature/custom-mtu", "feature/native-profiles" ]
+    branches: [ "main" ]
     tags: [ "v*" ]
   workflow_dispatch:
 
